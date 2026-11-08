@@ -94,18 +94,18 @@
 
 ```text
 rnvr/
-├── Cargo.toml             # Rust 專案依賴配置
+├── Cargo.toml             # Rust 專案依賴與 [package.metadata.deb] 打包配置
 ├── config.toml            # 攝影機連線參數與循環錄影設定檔
-├── config.example.toml    # 設定檔預設範本 (供 .deb 封裝與版控使用)
-├── build_deb.sh           # 一鍵打包 Ubuntu .deb 安裝檔與設定執行檔圖示腳本
+├── config.example.toml    # 設定檔預設範本 (供 cargo deb 封裝與版控使用)
 ├── install.sh             # Ubuntu 跨機一鍵安裝與桌面捷徑部署腳本
 ├── rnvr.md                # 原始系統架構規劃書
 ├── README.md              # 軟體架構、安裝與使用說明文件
 ├── assets/
+│   ├── rnvr.desktop       # Ubuntu 桌面應用程式捷徑設定檔
 │   ├── rnvr.png           # 256x256 專屬 NVR 監控鏡頭 + REC 紅燈圖示 (PNG)
 │   └── rnvr.svg           # 可縮放向量圖示 (SVG)
-├── dist/
-│   └── rnvr_0.1.0_amd64.deb # 打包完成之 Ubuntu .deb 安裝包
+├── debian/
+│   └── postinst           # .deb 安裝後自動更新系統圖示快取與桌面資料庫腳本
 └── src/
     ├── main.rs            # 程式進入點：CLI 解析、自動初始化設定檔、啟動 Iced 視窗
     ├── config.rs          # Serde 設定檔結構定義與 RTSP URL 編碼組裝
@@ -120,29 +120,32 @@ rnvr/
 
 ## 4. 安裝與跨機部署說明
 
-### 方式 A：使用 `.deb` 安裝包跨機安裝（最推薦）
+### 方式 A：使用 `cargo deb` 產生 `.deb` 安裝包跨機安裝（最推薦）
 
-本專案提供 `build_deb.sh` 一鍵打包腳本，可將編譯好的執行檔、系統圖示、桌面應用程式捷徑與所有依賴宣告打包為標準 Ubuntu `.deb` 安裝檔：
+本專案已在 `Cargo.toml` 中完整設定 `[package.metadata.deb]`（包含 `$auto` 動態函式庫依賴解析、GStreamer 插件與中文字型依賴、`conf-files` 設定保護、系統圖示與桌面捷徑）：
 
-1. **在開發機產生 `.deb` 安裝包**（同時會自動透過 `gio` 將 `target/release/rnvr` 在 Ubuntu 檔案資料夾中的圖示設定為專屬攝影機圖示）：
+1. **在專案根目錄執行 `cargo deb` 打包**（若新環境尚未安裝 `cargo-deb`，可先執行 `cargo install cargo-deb`）：
    ```bash
-   ./build_deb.sh
+   cargo deb
    ```
-   執行後會在 `dist/` 目錄下產出：
-   `dist/rnvr_0.1.0_amd64.deb`
+   執行完成後會自動在 `target/debian/` 目錄下產出標準安裝包：
+   `target/debian/rnvr_0.1.0-1_amd64.deb`
 
 2. **將單一 `.deb` 檔案複製到另一台 Ubuntu 主機並安裝**：
    ```bash
-   scp dist/rnvr_0.1.0_amd64.deb user@<目標主機IP>:~/
+   scp target/debian/rnvr_0.1.0-1_amd64.deb user@<目標主機IP>:~/
    ssh user@<目標主機IP>
-   sudo apt install ./rnvr_0.1.0_amd64.deb
+   sudo apt install ./rnvr_0.1.0-1_amd64.deb
    ```
-   > 使用 `sudo apt install ./rnvr_0.1.0_amd64.deb` 時，Ubuntu 的 `apt` 會**全自動下載並安裝**所有必要的 GStreamer 插件與 `fonts-noto-cjk` 繁體中文字型，並自動註冊系統圖示與桌面選單捷徑 **「Foscam Rust NVR 監控系統」**。初次啟動時程式會自動於該使用者的 `~/.config/rnvr/config.toml` 建立可讀寫設定檔。
+   > 使用 `sudo apt install ./rnvr_0.1.0-1_amd64.deb` 時，Ubuntu 的 `apt` 會**全自動下載並安裝**所有必要的 GStreamer 插件與 `fonts-noto-cjk` 繁體中文字型，並自動註冊系統圖示與桌面選單捷徑 **「Foscam Rust NVR 監控系統」**。初次啟動時程式會自動於該使用者的 `~/.config/rnvr/config.toml` 建立可讀寫設定檔。
    >
    > **移除套件指令**：`sudo apt remove rnvr`
 
-3. **Ubuntu 檔案資料夾 (Nautilus) 執行檔自訂圖示說明**：
-   * 執行 `./build_deb.sh` 時，腳本會自動透過 GNOME `gio set` 將 `target/release/rnvr`、`target/debug/rnvr` 與 `dist/rnvr_0.1.0_amd64.deb` 綁定 `metadata::custom-icon` 為 `assets/rnvr.png`，並在專案目錄產生已授權的 `rnvr.desktop` 啟動器，讓您在 Ubuntu 檔案管理員中打開資料夾時能直接看到專屬的攝影機圖示。
+3. **Ubuntu 檔案資料夾 (Nautilus) 執行檔自訂圖示補充說明**：
+   * 若希望在本機開發目錄的 Ubuntu 檔案管理員中讓 `target/release/rnvr` 二進位檔直接顯示自訂攝影機圖示，可執行：
+     ```bash
+     gio set target/release/rnvr metadata::custom-icon "file://$(pwd)/assets/rnvr.png"
+     ```
 
 ---
 

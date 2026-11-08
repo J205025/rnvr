@@ -2,6 +2,7 @@
 name = "rnvr"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 description = "Ubuntu Rust NVR 監控錄影系統 — 單機雙碼流分離架構 (Foscam C5M)"
 
 [dependencies]
@@ -19,3 +20,25 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 urlencoding = "2.1"
+
+[package.metadata.deb]
+maintainer = "Ubuntu Rust NVR Developer <admin@localhost>"
+copyright = "2026, Ubuntu Rust NVR Developer"
+extended-description = """\
+Ubuntu Rust NVR Surveillance System for Foscam C5M (Dual-Stream Split Architecture). \
+Supports 3K (/videoMain) zero-decode MP4 segmented recording, 720p (/videoSub) live preview, \
+customizable segment duration (default 30 mins), retention days (default 30 days), \
+and Cron-scheduled disk space cleanup (default Tuesday 03:00)."""
+depends = "$auto, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, gstreamer1.0-libav, gstreamer1.0-tools, fonts-noto-cjk, xdg-utils"
+recommends = "gstreamer1.0-vaapi"
+section = "video"
+priority = "optional"
+conf-files = ["/etc/rnvr/config.toml"]
+maintainer-scripts = "debian/"
+assets = [
+    ["target/release/rnvr", "usr/bin/", "755"],
+    ["config.example.toml", "etc/rnvr/config.toml", "644"],
+    ["assets/rnvr.desktop", "usr/share/applications/rnvr.desktop", "644"],
+    ["assets/rnvr.png", "usr/share/icons/hicolor/256x256/apps/rnvr.png", "644"],
+    ["assets/rnvr.svg", "usr/share/icons/hicolor/scalable/apps/rnvr.svg", "644"],
+]
