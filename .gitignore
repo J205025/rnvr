@@ -1,0 +1,33 @@
+# Rust 編譯產物 (Build artifacts)
+/target/
+**/*.rs.bk
+*.pdb
+
+# 私密連線設定檔 (避免將真實攝影機 IP 與密碼提交至 Git)
+# 若需版控範本，請保留 config.example.toml 並取消下方 config.toml 註解：
+# config.toml
+config.local.toml
+*.secret.toml
+
+# NVR 錄影與截圖檔案 (避免誤將大容量 MP4 影片或截圖提交至 Git)
+/Foscam_Recordings/
+/recordings/
+/screenshots/
+*.mp4
+*.mkv
+*.ts
+*.png
+*.jpg
+
+# GStreamer 除錯日誌與管線圖
+*.log
+*.dot
+
+# 作業系統與編輯器暫存檔
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.vscode/
+.idea/

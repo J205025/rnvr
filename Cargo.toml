@@ -1,0 +1,21 @@
+[package]
+name = "rnvr"
+version = "0.1.0"
+edition = "2021"
+description = "Ubuntu Rust NVR 監控錄影系統 — 單機雙碼流分離架構 (Foscam C5M)"
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+flume = "0.11"
+gstreamer = "0.23"
+gstreamer-app = "0.23"
+gstreamer-video = "0.23"
+iced = { version = "0.13", features = ["image", "tokio"] }
+png = "0.17"
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.40", features = ["full"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+urlencoding = "2.1"

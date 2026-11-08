@@ -1,0 +1,18 @@
+[camera]
+name = "大門監控 (Foscam C5M)"
+ip = "192.168.1.101"
+port = 88
+username = "nvr_admin"
+password = "your_password"
+main_stream_path = "/videoMain"   # 3K 錄影用 (3072x1728 @ 25fps)
+sub_stream_path = "/videoSub"     # 720p 預覽用 (1280x720 @ 15fps)
+enable_audio = true               # 是否同時封裝 AAC 音訊軌至 MP4
+use_hw_accel = false              # 是否優先嘗試硬體加速解碼 (vaapih264dec)
+mock_mode = false                 # 測試模式：無實體攝影機時使用 GStreamer videotestsrc 模擬雙碼流
+
+[storage]
+record_dir = "/home/ubuntu/Foscam_Recordings"
+segment_duration_secs = 600       # 每 10 分鐘 (600秒) 切分一個 MP4 檔案
+max_storage_gb = 100              # 錄影資料夾最大容量上限 (例如 100 GB)
+cleanup_interval_secs = 300       # 每 5 分鐘檢查一次硬碟空間
+auto_start_recording = true       # 啟動軟體時自動開始 3K 錄影
