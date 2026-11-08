@@ -22,6 +22,7 @@ pub struct NvrApp {
     config: AppConfig,
     config_file_path: PathBuf,
     current_time_str: String,
+    app_icon_handle: iced_image::Handle,
 
     // 預覽管線狀態與畫面
     latest_frame: Option<PreviewFrame>,
@@ -141,6 +142,11 @@ impl NvrApp {
             config,
             config_file_path,
             current_time_str: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            app_icon_handle: iced_image::Handle::from_rgba(
+                36,
+                36,
+                crate::icon::render_nvr_icon_rgba(36),
+            ),
             latest_frame: None,
             frame_handle: None,
             viewer_connected: false,
@@ -495,6 +501,9 @@ impl NvrApp {
 
         let header_bar = container(
             row![
+                iced_image(self.app_icon_handle.clone())
+                    .width(Length::Fixed(28.0))
+                    .height(Length::Fixed(28.0)),
                 container(cjk_text(rec_badge_text).size(15).color(rec_badge_color)).padding([4, 10]),
                 cjk_text(&self.config.camera.name)
                     .size(18)

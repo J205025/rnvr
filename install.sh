@@ -48,7 +48,18 @@ fi
 
 mkdir -p "${HOME}/Foscam_Recordings"
 
-echo "[4/4] 建立 Ubuntu 桌面應用程式捷徑..."
+echo "[4/4] 安裝程式圖示與建立 Ubuntu 桌面應用程式捷徑..."
+ICON_DIR_PNG="${HOME}/.local/share/icons/hicolor/256x256/apps"
+ICON_DIR_SVG="${HOME}/.local/share/icons/hicolor/scalable/apps"
+mkdir -p "${ICON_DIR_PNG}" "${ICON_DIR_SVG}"
+
+if [ -f "${SCRIPT_DIR}/assets/rnvr.png" ]; then
+    cp "${SCRIPT_DIR}/assets/rnvr.png" "${ICON_DIR_PNG}/rnvr.png"
+fi
+if [ -f "${SCRIPT_DIR}/assets/rnvr.svg" ]; then
+    cp "${SCRIPT_DIR}/assets/rnvr.svg" "${ICON_DIR_SVG}/rnvr.svg"
+fi
+
 APP_DIR="${HOME}/.local/share/applications"
 mkdir -p "${APP_DIR}"
 cat > "${APP_DIR}/rnvr.desktop" <<EOF
@@ -57,7 +68,8 @@ Type=Application
 Name=Foscam Rust NVR 監控系統
 Comment=Foscam C5M 單機雙碼流 (3K 錄影 + 720p 預覽) 監控錄影系統
 Exec=/usr/local/bin/rnvr --config ${CONFIG_DIR}/config.toml
-Icon=camera-video
+Icon=${ICON_DIR_PNG}/rnvr.png
+StartupWMClass=rnvr
 Terminal=false
 Categories=AudioVideo;Video;Recorder;
 EOF

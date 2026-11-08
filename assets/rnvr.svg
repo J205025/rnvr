@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E293B"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+    <linearGradient id="lensGrad" x1="20%" y1="20%" x2="80%" y2="80%">
+      <stop offset="0%" stop-color="#0284C7"/>
+      <stop offset="60%" stop-color="#0369A1"/>
+      <stop offset="100%" stop-color="#082F49"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 圓角矩形底板 -->
+  <rect x="16" y="16" width="224" height="224" rx="48" ry="48" fill="url(#bgGrad)" stroke="#38BDF8" stroke-width="6"/>
+
+  <!-- 攝影機機身外環 -->
+  <circle cx="128" cy="132" r="72" fill="#334155" stroke="#94A3B8" stroke-width="6"/>
+  <circle cx="128" cy="132" r="56" fill="url(#lensGrad)" stroke="#38BDF8" stroke-width="4"/>
+
+  <!-- 鏡頭深層光圈與反光高光 -->
+  <circle cx="128" cy="132" r="28" fill="#091526"/>
+  <circle cx="110" cy="114" r="11" fill="#E0F2FE" fill-opacity="0.85"/>
+  <circle cx="144" cy="148" r="5" fill="#7DD3FC" fill-opacity="0.6"/>
+
+  <!-- 右上角 3K REC 錄影紅燈 -->
+  <circle cx="196" cy="60" r="18" fill="#EF4444" fill-opacity="0.28"/>
+  <circle cx="196" cy="60" r="11" fill="#EF4444" stroke="#FCA5A5" stroke-width="2"/>
+</svg>

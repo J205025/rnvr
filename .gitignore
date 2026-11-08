@@ -1,5 +1,8 @@
 # Rust 編譯產物 (Build artifacts)
 /target/
+/dist/
+*.deb
+rnvr.desktop
 **/*.rs.bk
 *.pdb
 
@@ -18,6 +21,8 @@ config.local.toml
 *.ts
 *.png
 *.jpg
+!/assets/*.png
+!/assets/*.svg
 
 # GStreamer 除錯日誌與管線圖
 *.log
