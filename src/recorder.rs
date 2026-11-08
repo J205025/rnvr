@@ -25,7 +25,7 @@ pub enum RecorderEvent {
 pub enum RecorderCommand {
     Start,
     Stop,
-    UpdateConfig(CameraConfig),
+    UpdateConfig(CameraConfig, StorageConfig),
     Shutdown,
 }
 
@@ -47,7 +47,7 @@ pub fn spawn_recorder_worker(
 
 fn run_recorder_loop(
     mut camera_cfg: CameraConfig,
-    storage_cfg: StorageConfig,
+    mut storage_cfg: StorageConfig,
     event_tx: Sender<RecorderEvent>,
     cmd_rx: Receiver<RecorderCommand>,
 ) {
@@ -71,9 +71,13 @@ fn run_recorder_loop(
                     info!("使用者啟動 3K 錄影管線");
                 }
                 Ok(RecorderCommand::Stop) => continue,
-                Ok(RecorderCommand::UpdateConfig(new_cfg)) => {
-                    info!("錄影管線已更新攝影機連線設定: {}:{}", new_cfg.ip, new_cfg.port);
-                    camera_cfg = new_cfg;
+                Ok(RecorderCommand::UpdateConfig(new_cam, new_sto)) => {
+                    info!(
+                        "錄影管線已更新設定: {}:{} (單檔 {} 分鐘)",
+                        new_cam.ip, new_cam.port, new_sto.segment_duration_mins
+                    );
+                    camera_cfg = new_cam;
+                    storage_cfg = new_sto;
                 }
                 Ok(RecorderCommand::Shutdown) | Err(_) => {
                     info!("錄影管線結束執行緒");
@@ -108,9 +112,13 @@ fn run_recorder_loop(
                 });
                 continue;
             }
-            Ok(SessionOutcome::ConfigUpdated(new_cfg)) => {
-                info!("錄影管線立即切換至新攝影機設定: {}:{}", new_cfg.ip, new_cfg.port);
-                camera_cfg = new_cfg;
+            Ok(SessionOutcome::ConfigUpdated(new_cam, new_sto)) => {
+                info!(
+                    "錄影管線立即切換至新設定: {}:{} (單檔 {} 分鐘)",
+                    new_cam.ip, new_cam.port, new_sto.segment_duration_mins
+                );
+                camera_cfg = new_cam;
+                storage_cfg = new_sto;
                 immediate_reconnect = true;
             }
             Ok(SessionOutcome::Shutdown) => {
@@ -150,9 +158,13 @@ fn run_recorder_loop(
                     break;
                 }
                 Ok(RecorderCommand::Start) => {}
-                Ok(RecorderCommand::UpdateConfig(new_cfg)) => {
-                    info!("錄影管線於倒數期間收到新設定，立即重連: {}:{}", new_cfg.ip, new_cfg.port);
-                    camera_cfg = new_cfg;
+                Ok(RecorderCommand::UpdateConfig(new_cam, new_sto)) => {
+                    info!(
+                        "錄影管線於倒數期間收到新設定，立即重連: {}:{} (單檔 {} 分鐘)",
+                        new_cam.ip, new_cam.port, new_sto.segment_duration_mins
+                    );
+                    camera_cfg = new_cam;
+                    storage_cfg = new_sto;
                     break;
                 }
                 Ok(RecorderCommand::Shutdown) => return,
@@ -165,7 +177,7 @@ fn run_recorder_loop(
 
 enum SessionOutcome {
     PausedByUser,
-    ConfigUpdated(CameraConfig),
+    ConfigUpdated(CameraConfig, StorageConfig),
     Disconnected,
     Shutdown,
 }
@@ -204,9 +216,9 @@ fn run_single_recording_session(
                     outcome = SessionOutcome::PausedByUser;
                     break;
                 }
-                RecorderCommand::UpdateConfig(new_cfg) => {
-                    info!("收到更新攝影機設定指令，正在安全寫入當前 MP4 檔尾並切換連線...");
-                    outcome = SessionOutcome::ConfigUpdated(new_cfg);
+                RecorderCommand::UpdateConfig(new_cam, new_sto) => {
+                    info!("收到更新設定指令，正在安全寫入當前 MP4 檔尾並切換連線...");
+                    outcome = SessionOutcome::ConfigUpdated(new_cam, new_sto);
                     break;
                 }
                 RecorderCommand::Shutdown => {
@@ -290,7 +302,7 @@ fn build_recorder_pipeline(
         .with_context(|| format!("無法建立錄影資料夾: {}", storage_cfg.record_dir.display()))?;
 
     let max_size_time_ns = storage_cfg
-        .segment_duration_secs
+        .segment_duration_secs()
         .saturating_mul(1_000_000_000);
 
     let pipeline = gst::Pipeline::with_name("foscam-main-recorder");
@@ -518,9 +530,10 @@ mod tests {
 
         let storage_cfg = StorageConfig {
             record_dir: temp_dir.clone(),
-            segment_duration_secs: 60,
+            segment_duration_mins: 30,
+            retention_days: 30,
+            cleanup_cron: "0 3 * * 2".to_string(),
             max_storage_gb: 10.0,
-            cleanup_interval_secs: 60,
             auto_start_recording: true,
         };
 
@@ -550,7 +563,13 @@ mod tests {
         }
         assert!(recorded_file.is_some(), "應該產生錄影切片檔名");
 
-        let stats = crate::storage_mgr::enforce_retention_policy(&temp_dir, 10_000_000, false);
+        let stats = crate::storage_mgr::enforce_retention_policy(
+            &temp_dir,
+            10_000_000,
+            30,
+            false,
+            "2026-11-10 03:00".to_string(),
+        );
         assert!(stats.file_count >= 1, "應該至少有 1 個 MP4 檔案");
         assert!(stats.used_bytes > 1000, "MP4 檔案大小應大於 1KB");
 

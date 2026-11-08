@@ -30,13 +30,46 @@ fn default_enable_audio() -> bool {
     true
 }
 
+fn default_segment_duration_mins() -> u64 {
+    30
+}
+
+fn default_retention_days() -> u32 {
+    30
+}
+
+fn default_cleanup_cron() -> String {
+    "0 3 * * 2".to_string()
+}
+
+fn default_max_storage_gb() -> f64 {
+    100.0
+}
+
+fn default_auto_start_recording() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
     pub record_dir: PathBuf,
-    pub segment_duration_secs: u64,
+    #[serde(default = "default_segment_duration_mins")]
+    pub segment_duration_mins: u64,
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u32,
+    #[serde(default = "default_cleanup_cron")]
+    pub cleanup_cron: String,
+    #[serde(default = "default_max_storage_gb")]
     pub max_storage_gb: f64,
-    pub cleanup_interval_secs: u64,
+    #[serde(default = "default_auto_start_recording")]
     pub auto_start_recording: bool,
+}
+
+impl StorageConfig {
+    /// 取得單一錄影切片秒數 (分鐘 * 60)
+    pub fn segment_duration_secs(&self) -> u64 {
+        self.segment_duration_mins.max(1).saturating_mul(60)
+    }
 }
 
 impl CameraConfig {
@@ -99,9 +132,10 @@ impl Default for AppConfig {
             },
             storage: StorageConfig {
                 record_dir: PathBuf::from("/home/ubuntu/Foscam_Recordings"),
-                segment_duration_secs: 600,
+                segment_duration_mins: 30,
+                retention_days: 30,
+                cleanup_cron: "0 3 * * 2".to_string(),
                 max_storage_gb: 100.0,
-                cleanup_interval_secs: 300,
                 auto_start_recording: true,
             },
         }
@@ -116,12 +150,14 @@ impl AppConfig {
         let mut cfg: AppConfig = toml::from_str(&content)
             .with_context(|| format!("設定檔 TOML 格式解析失敗: {}", path_ref.display()))?;
 
-        // 確保分段秒數與清理間隔有合理下限
-        if cfg.storage.segment_duration_secs < 10 {
-            cfg.storage.segment_duration_secs = 10;
+        if cfg.storage.segment_duration_mins < 1 {
+            cfg.storage.segment_duration_mins = 1;
         }
-        if cfg.storage.cleanup_interval_secs < 10 {
-            cfg.storage.cleanup_interval_secs = 10;
+        if cfg.storage.retention_days < 1 {
+            cfg.storage.retention_days = 1;
+        }
+        if cfg.storage.cleanup_cron.trim().is_empty() {
+            cfg.storage.cleanup_cron = default_cleanup_cron();
         }
         if cfg.storage.max_storage_gb <= 0.1 {
             cfg.storage.max_storage_gb = 1.0;

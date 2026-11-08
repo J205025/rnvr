@@ -12,7 +12,8 @@ mock_mode = false                 # 測試模式：無實體攝影機時使用 G
 
 [storage]
 record_dir = "/home/ubuntu/Foscam_Recordings"
-segment_duration_secs = 600       # 每 10 分鐘 (600秒) 切分一個 MP4 檔案
+segment_duration_mins = 30        # 單一 MP4 檔案錄影時間 (預設 30 分鐘)
+retention_days = 30               # 錄影檔案保留天數 (預設超過 30 天自動刪除)
+cleanup_cron = "0 3 * * 2"        # 磁碟巡檢 Cron 排程 (分 時 日 月 週，預設每週二 03:00 檢查)
 max_storage_gb = 100              # 錄影資料夾最大容量上限 (例如 100 GB)
-cleanup_interval_secs = 300       # 每 5 分鐘檢查一次硬碟空間
 auto_start_recording = true       # 啟動軟體時自動開始 3K 錄影

@@ -197,9 +197,10 @@ mock_mode = false                # 測試模式：設為 true 時使用 GStreame
 
 [storage]
 record_dir = "/home/ubuntu/Foscam_Recordings" # 錄影檔案與截圖儲存根目錄
-segment_duration_secs = 600      # 每個 MP4 錄影切片的秒數 (600 秒 = 10 分鐘)
+segment_duration_mins = 30       # 單一 MP4 檔案錄影時間 (預設 30 分鐘，可於 GUI 自訂)
+retention_days = 30              # 錄影檔案保留天數 (預設超過 30 天自動刪除，可於 GUI 自訂)
+cleanup_cron = "0 3 * * 2"       # 磁碟巡檢 Cron 排程 (分 時 日 月 週，預設每週二 03:00 檢查)
 max_storage_gb = 100             # 錄影資料夾最大容量上限 (單位: GB)
-cleanup_interval_secs = 300      # 背景空間巡檢間隔秒數 (300 秒 = 每 5 分鐘巡檢一次)
 auto_start_recording = true      # 啟動軟體時是否立即自動開始 3K 錄影
 ```
 
