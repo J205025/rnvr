@@ -1,6 +1,6 @@
 [package]
 name = "rnvr"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
 description = "Ubuntu Rust NVR 監控錄影系統 — 單機雙碼流分離架構 (Foscam C5M)"
