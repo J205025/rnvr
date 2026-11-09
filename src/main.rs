@@ -19,13 +19,17 @@ use tracing::{info, warn};
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new(
+                    "info,iced_winit=warn,iced_wgpu=warn,wgpu_core=warn,wgpu_hal=warn,sctk_adwaita=error",
+                )
+            }),
         )
         .init();
 
     let args: Vec<String> = env::args().collect();
     let mut config_path: Option<PathBuf> = None;
+    let mut renderer_override: Option<String> = None;
     let mut force_mock = false;
     let mut check_env_only = false;
 
@@ -38,6 +42,12 @@ fn main() -> Result<()> {
                     i += 1;
                 }
             }
+            "--renderer" | "-r" => {
+                if i + 1 < args.len() {
+                    renderer_override = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
             "--mock" | "--test-pattern" => {
                 force_mock = true;
             }
@@ -47,10 +57,11 @@ fn main() -> Result<()> {
             "--help" | "-h" => {
                 println!("Ubuntu Rust NVR 監控錄影系統 (Foscam C5M 單機雙碼流分離架構)");
                 println!("用法: rnvr [選項]");
-                println!("  -c, --config <PATH>   指定設定檔路徑 (預設自動搜尋 ./config.toml 或 ~/.config/rnvr/config.toml)");
-                println!("  --mock                啟用測試訊號源模式 (無須連接實體攝影機即可驗證預覽與分段錄影)");
-                println!("  --check-env           檢查系統 GStreamer 插件完整性並結束");
-                println!("  -h, --help            顯示此說明");
+                println!("  -c, --config <PATH>       指定設定檔路徑 (預設自動搜尋 ./config.toml 或 ~/.config/rnvr/config.toml)");
+                println!("  -r, --renderer <BACKEND>  指定圖形渲染後端: auto (預設), gl (硬體 OpenGL), vulkan, tiny-skia (2D 軟體)");
+                println!("  --mock                    啟用測試訊號源模式 (無須連接實體攝影機即可驗證預覽與分段錄影)");
+                println!("  --check-env               檢查系統 GStreamer 插件與硬體解碼支援並結束");
+                println!("  -h, --help                顯示此說明");
                 return Ok(());
             }
             _ => {}
@@ -65,7 +76,10 @@ fn main() -> Result<()> {
         return verify_gstreamer_plugins();
     }
 
-    // 2. 載入設定檔並決定可寫入的儲存路徑 (支援 .deb 安裝後自動初始化 ~/.config/rnvr/config.toml)
+    // 2. 智慧選擇最佳圖形渲染後端 (避免 wgpu 在舊款 Intel 內顯或無 Vulkan 主機上誤選 llvmpipe CPU 軟體模擬)
+    configure_optimal_graphics_backend(renderer_override.as_deref());
+
+    // 3. 載入設定檔並決定可寫入的儲存路徑 (支援 .deb 安裝後自動初始化 ~/.config/rnvr/config.toml)
     let (mut app_config, save_path) = load_or_init_config(config_path)?;
 
     if force_mock {
@@ -73,7 +87,7 @@ fn main() -> Result<()> {
         app_config.camera.mock_mode = true;
     }
 
-    // 3. 啟動 Iced 視窗 (設定專屬攝影機圖示、Wayland application_id 與繁體中文字型)
+    // 4. 啟動 Iced 視窗 (設定專屬攝影機圖示、Wayland application_id 與繁體中文字型)
     #[cfg(target_os = "linux")]
     let platform_specific = window::settings::PlatformSpecific {
         application_id: "rnvr".to_string(),
@@ -103,6 +117,42 @@ fn main() -> Result<()> {
         .context("Iced GUI 視窗執行失敗")?;
 
     Ok(())
+}
+
+/// 智慧設定圖形渲染後端，徹底避開 Linux Mesa `llvmpipe` (CPU 軟體模擬 Vulkan) 造成的高 CPU 負載
+fn configure_optimal_graphics_backend(explicit_renderer: Option<&str>) {
+    if let Some(mode) = explicit_renderer {
+        match mode.trim().to_ascii_lowercase().as_str() {
+            "tiny-skia" | "skia" | "software" | "cpu" | "2d" => {
+                env::set_var("ICED_BACKEND", "tiny-skia");
+                info!("已啟用輕量 2D 渲染後端 (ICED_BACKEND=tiny-skia)");
+                return;
+            }
+            "wgpu" | "vulkan" | "vk" => {
+                env::set_var("ICED_BACKEND", "wgpu");
+                env::set_var("WGPU_BACKEND", "vulkan");
+                info!("已指定使用 Vulkan 渲染後端 (ICED_BACKEND=wgpu, WGPU_BACKEND=vulkan)");
+                return;
+            }
+            "gl" | "opengl" | "gles" => {
+                env::set_var("ICED_BACKEND", "wgpu");
+                env::set_var("WGPU_BACKEND", "gl");
+                info!("已指定使用 OpenGL 渲染後端 (ICED_BACKEND=wgpu, WGPU_BACKEND=gl)");
+                return;
+            }
+            _ => {}
+        }
+    }
+
+    // 若使用者已透過環境變數自行指定，尊重使用者設定
+    if env::var_os("WGPU_BACKEND").is_some() || env::var_os("ICED_BACKEND").is_some() {
+        return;
+    }
+
+    // 預設採用輕量 2D 渲染後端 (tiny-skia)，避免在舊款 Intel 內顯、迷你電腦、工控機或無獨立顯卡主機上
+    // 觸發 Mesa llvmpipe (LLVM CPU 軟體模擬 Vulkan 3D 管線) 導致 CPU 飆升與記憶體暴增。
+    env::set_var("ICED_BACKEND", "tiny-skia");
+    info!("自動啟用低耗能 2D 圖形渲染後端 (ICED_BACKEND=tiny-skia)，避免觸發 llvmpipe CPU 3D 軟體模擬");
 }
 
 /// 載入設定檔，並回傳 `(AppConfig, 可寫入的設定檔路徑)`
@@ -174,7 +224,7 @@ fn default_config_for_current_user() -> AppConfig {
     cfg
 }
 
-/// 檢查雙碼流管線所需的 GStreamer 插件是否皆已安裝
+/// 檢查雙碼流管線所需的 GStreamer 插件與硬體解碼支援是否就緒
 fn verify_gstreamer_plugins() -> Result<()> {
     let required_elements = [
         ("rtspsrc", "gstreamer1.0-plugins-good"),
@@ -200,14 +250,18 @@ fn verify_gstreamer_plugins() -> Result<()> {
         }
     }
 
-    if gst::ElementFactory::find("vaapih264dec").is_some() {
-        println!("  [OK] vaapih264dec     (選用硬體解碼加速可用)");
+    println!("\n=== 硬體 H.264 解碼加速支援檢查 ===");
+    if let Some((hw_elem, hw_desc)) = viewer::detect_available_hw_decoder() {
+        println!(
+            "  [OK] {:<16} (已就緒！預覽管線將優先使用 {} 硬體解碼)",
+            hw_elem, hw_desc
+        );
     } else {
-        println!("  [資訊] vaapih264dec   (未安裝，將使用純 CPU avdec_h264 解碼 720p)");
+        println!("  [資訊] 未偵測到硬體解碼器 (建議安裝 i965-va-driver 或 intel-media-va-driver)，將使用 avdec_h264 (CPU)");
     }
 
     if missing.is_empty() {
-        println!("=== 所有必要 GStreamer 插件皆已就緒！ ===");
+        println!("\n=== 所有必要 GStreamer 插件皆已就緒！ ===");
         Ok(())
     } else {
         anyhow::bail!("缺少必要的 GStreamer 插件，請執行 install.sh 或安裝對應套件")

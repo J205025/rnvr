@@ -524,6 +524,8 @@ mod tests {
             sub_stream_path: "/videoSub".to_string(),
             enable_audio: false,
             use_hw_accel: false,
+            preview_max_fps: 12,
+            preview_enabled: true,
             mock_mode: true,
         };
         cam_cfg.mock_mode = true;

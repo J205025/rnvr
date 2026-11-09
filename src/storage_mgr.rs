@@ -16,6 +16,7 @@ pub struct StorageStats {
     pub max_bytes: u64,
     pub file_count: usize,
     pub deleted_in_last_run: usize,
+    #[allow(dead_code)]
     pub last_check_time: String,
     pub next_cron_time: String,
 }
@@ -437,8 +438,8 @@ pub fn spawn_storage_manager(
         let mut last_deleted_count = initial_stats.deleted_in_last_run;
         let _ = stats_tx.send(initial_stats);
 
-        // 每 5 秒檢查一次是否到達 Cron 排程時間，並更新介面磁碟容量顯示
-        let mut ticker = tokio::time::interval(Duration::from_secs(5));
+        // 每 15 秒檢查一次是否到達 Cron 排程時間，並更新介面磁碟容量顯示 (降低背景磁碟掃描與 UI 重繪頻率)
+        let mut ticker = tokio::time::interval(Duration::from_secs(15));
 
         loop {
             tokio::select! {

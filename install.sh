@@ -17,8 +17,8 @@ sudo apt-get install -y \
     gstreamer1.0-libav gstreamer1.0-tools \
     fonts-noto-cjk xdg-utils
 
-# gstreamer1.0-vaapi 在部分 Ubuntu 版本為選用套件，嘗試安裝但不強制失敗
-sudo apt-get install -y gstreamer1.0-vaapi || true
+# 安裝 VA-API 硬體加速解碼插件與 Intel / AMD 顯示卡驅動 (舊款 Intel i965 與新款 Intel Media Driver)
+sudo apt-get install -y gstreamer1.0-vaapi va-driver-all i965-va-driver intel-media-va-driver vainfo || true
 
 echo "[2/4] 準備執行檔..."
 if [ -f "${SCRIPT_DIR}/target/release/rnvr" ]; then

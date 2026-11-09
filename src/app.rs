@@ -30,7 +30,9 @@ pub struct NvrApp {
     latest_frame: Option<PreviewFrame>,
     frame_handle: Option<iced_image::Handle>,
     viewer_connected: bool,
+    preview_paused: bool,
     viewer_fps: f32,
+    viewer_decoder_name: String,
     viewer_status_text: String,
 
     // 錄影管線狀態
@@ -52,6 +54,8 @@ pub struct NvrApp {
     edit_password: String,
     edit_main_path: String,
     edit_sub_path: String,
+    edit_use_hw_accel: bool,
+    edit_preview_max_fps: String,
     edit_segment_mins: String,
     edit_retention_days: String,
     edit_cleanup_cron: String,
@@ -85,8 +89,14 @@ impl Drop for NvrApp {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Tick,
+    // 事件驅動訊息 (僅在收到新畫面、狀態變更或每秒時鐘跳動時觸發更新，避免 30Hz 空轉重繪)
+    ClockTick,
+    ViewerEvent(ViewerEvent),
+    RecorderEvent(RecorderEvent),
+    StorageEvent(StorageStats),
+    // 操作控制事件
     ToggleRecording,
+    TogglePreview,
     TakeScreenshot,
     OpenRecordFolder,
     TriggerStorageCleanup,
@@ -97,6 +107,7 @@ pub enum Message {
     // 系統與連線設定相關事件
     ToggleSettingsPanel,
     ToggleShowPassword,
+    ToggleEditHwAccel,
     EditNameChanged(String),
     EditIpChanged(String),
     EditPortChanged(String),
@@ -104,6 +115,7 @@ pub enum Message {
     EditPasswordChanged(String),
     EditMainPathChanged(String),
     EditSubPathChanged(String),
+    EditPreviewMaxFpsChanged(String),
     EditSegmentMinsChanged(String),
     EditRetentionDaysChanged(String),
     EditCleanupCronChanged(String),
@@ -113,8 +125,8 @@ pub enum Message {
 
 impl NvrApp {
     pub fn new(config: AppConfig, config_file_path: PathBuf) -> (Self, Task<Message>) {
-        // 建立預覽管線 Channel
-        let (viewer_tx, viewer_rx) = flume::bounded(8);
+        // 建立預覽管線 Channel (容量設為 2，避免堆積舊畫面與浪費記憶體複製)
+        let (viewer_tx, viewer_rx) = flume::bounded(2);
         let (viewer_cmd_tx, viewer_cmd_rx) = flume::unbounded();
         spawn_viewer_worker(config.camera.clone(), viewer_tx, viewer_cmd_rx);
 
@@ -135,6 +147,7 @@ impl NvrApp {
 
         let max_bytes = (config.storage.max_storage_gb * 1024.0 * 1024.0 * 1024.0) as u64;
         let auto_rec = config.storage.auto_start_recording;
+        let preview_paused = !config.camera.preview_enabled;
 
         let edit_name = config.camera.name.clone();
         let edit_ip = config.camera.ip.clone();
@@ -143,6 +156,8 @@ impl NvrApp {
         let edit_password = config.camera.password.clone();
         let edit_main_path = config.camera.main_stream_path.clone();
         let edit_sub_path = config.camera.sub_stream_path.clone();
+        let edit_use_hw_accel = config.camera.use_hw_accel;
+        let edit_preview_max_fps = config.camera.preview_max_fps.to_string();
         let edit_segment_mins = config.storage.segment_duration_mins.to_string();
         let edit_retention_days = config.storage.retention_days.to_string();
         let edit_cleanup_cron = config.storage.cleanup_cron.clone();
@@ -160,8 +175,14 @@ impl NvrApp {
             latest_frame: None,
             frame_handle: None,
             viewer_connected: false,
+            preview_paused,
             viewer_fps: 0.0,
-            viewer_status_text: "初始化中...".to_string(),
+            viewer_decoder_name: String::new(),
+            viewer_status_text: if preview_paused {
+                "已暫停預覽 (省電純 3K 錄影模式)".to_string()
+            } else {
+                "初始化中...".to_string()
+            },
             is_recording: false,
             recording_enabled: auto_rec,
             current_record_file: None,
@@ -187,6 +208,8 @@ impl NvrApp {
             edit_password,
             edit_main_path,
             edit_sub_path,
+            edit_use_hw_accel,
+            edit_preview_max_fps,
             edit_segment_mins,
             edit_retention_days,
             edit_cleanup_cron,
@@ -214,70 +237,81 @@ impl NvrApp {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        // 約 30Hz (33ms) 輪詢更新預覽畫面與管線狀態，並監聽 F11 / Esc 全螢幕快捷鍵
-        let tick_sub = iced::time::every(Duration::from_millis(33)).map(|_| Message::Tick);
+        // 採用事件驅動 Subscription：僅在背景執行緒送來新畫面/狀態或每秒時鐘跳動 (1Hz) 時才喚醒 GUI，徹底消除無效的 30Hz 空轉重繪
+        let clock_sub = iced::time::every(Duration::from_secs(1)).map(|_| Message::ClockTick);
+        let viewer_sub =
+            Subscription::run_with_id("viewer-events", self.viewer_rx.clone().into_stream())
+                .map(Message::ViewerEvent);
+        let recorder_sub =
+            Subscription::run_with_id("recorder-events", self.recorder_rx.clone().into_stream())
+                .map(Message::RecorderEvent);
+        let storage_sub =
+            Subscription::run_with_id("storage-events", self.storage_rx.clone().into_stream())
+                .map(Message::StorageEvent);
+
         let key_sub = keyboard::on_key_press(|key, _modifiers| match key {
             keyboard::Key::Named(keyboard::key::Named::F11) => Some(Message::ToggleFullscreen),
             keyboard::Key::Named(keyboard::key::Named::Escape) => Some(Message::ExitFullscreen),
             _ => None,
         });
-        Subscription::batch([tick_sub, key_sub])
+
+        Subscription::batch([clock_sub, viewer_sub, recorder_sub, storage_sub, key_sub])
+    }
+
+    fn apply_viewer_event(&mut self, ev: ViewerEvent) {
+        match ev {
+            ViewerEvent::Frame(frame) => {
+                if !self.preview_paused {
+                    // O(1) Zero-Copy 引用計數複製，不複製 3.68MB 像素資料
+                    self.frame_handle = Some(frame.handle.clone());
+                    self.latest_frame = Some(frame);
+                }
+            }
+            ViewerEvent::Status {
+                connected,
+                paused,
+                fps,
+                decoder_name,
+                message,
+            } => {
+                self.viewer_connected = connected;
+                self.preview_paused = paused;
+                self.viewer_fps = fps;
+                self.viewer_decoder_name = decoder_name;
+                self.viewer_status_text = message;
+            }
+        }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Tick => {
+            Message::ClockTick => {
                 self.current_time_str = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            }
 
-                // 1. 汲取預覽管線最新畫面幀與狀態
-                let mut newest_frame: Option<PreviewFrame> = None;
+            Message::ViewerEvent(first_ev) => {
+                self.apply_viewer_event(first_ev);
+                // 若佇列中同時有多筆事件，一次汲取至最新一幀，避免連續重繪
                 while let Ok(ev) = self.viewer_rx.try_recv() {
-                    match ev {
-                        ViewerEvent::Frame(frame) => {
-                            newest_frame = Some(frame);
-                        }
-                        ViewerEvent::Status {
-                            connected,
-                            fps,
-                            message,
-                        } => {
-                            self.viewer_connected = connected;
-                            self.viewer_fps = fps;
-                            self.viewer_status_text = message;
-                        }
-                    }
+                    self.apply_viewer_event(ev);
                 }
+            }
 
-                if let Some(frame) = newest_frame {
-                    self.frame_handle = Some(iced_image::Handle::from_rgba(
-                        frame.width,
-                        frame.height,
-                        frame.rgba.clone(),
-                    ));
-                    self.latest_frame = Some(frame);
-                }
+            Message::RecorderEvent(ev) => {
+                let RecorderEvent::Status {
+                    is_recording,
+                    is_enabled,
+                    current_file,
+                    message,
+                } = ev;
+                self.is_recording = is_recording;
+                self.recording_enabled = is_enabled;
+                self.current_record_file = current_file;
+                self.recorder_status_text = message;
+            }
 
-                // 2. 汲取 3K 錄影管線狀態
-                while let Ok(ev) = self.recorder_rx.try_recv() {
-                    match ev {
-                        RecorderEvent::Status {
-                            is_recording,
-                            is_enabled,
-                            current_file,
-                            message,
-                        } => {
-                            self.is_recording = is_recording;
-                            self.recording_enabled = is_enabled;
-                            self.current_record_file = current_file;
-                            self.recorder_status_text = message;
-                        }
-                    }
-                }
-
-                // 3. 汲取硬碟空間統計狀態
-                while let Ok(stats) = self.storage_rx.try_recv() {
-                    self.storage_stats = stats;
-                }
+            Message::StorageEvent(stats) => {
+                self.storage_stats = stats;
             }
 
             Message::ToggleRecording => {
@@ -289,8 +323,34 @@ impl NvrApp {
                 let _ = self.storage_cmd_tx.send(StorageCommand::RefreshNow);
             }
 
+            Message::TogglePreview => {
+                if self.preview_paused {
+                    self.preview_paused = false;
+                    self.config.camera.preview_enabled = true;
+                    let _ = self.viewer_cmd_tx.send(ViewerCommand::Resume);
+                    self.toast_message = Some("已恢復 720p 即時預覽畫面".to_string());
+                } else {
+                    self.preview_paused = true;
+                    self.viewer_connected = false;
+                    self.viewer_fps = 0.0;
+                    self.frame_handle = None;
+                    self.config.camera.preview_enabled = false;
+                    let _ = self.viewer_cmd_tx.send(ViewerCommand::Pause);
+                    self.toast_message = Some(
+                        "已進入省電模式：暫停 720p 預覽解碼，背景 3K 錄影持續無損運作中"
+                            .to_string(),
+                    );
+                }
+                let _ = self.config.save_to_file(&self.config_file_path);
+            }
+
             Message::TakeScreenshot => {
                 if let Some(ref frame) = self.latest_frame {
+                    let Some(rgba_bytes) = frame.rgba_bytes() else {
+                        self.toast_message = Some("無法讀取畫面像素資料".to_string());
+                        return Task::none();
+                    };
+
                     let screenshots_dir = self.config.storage.record_dir.join("screenshots");
                     if let Err(e) = std::fs::create_dir_all(&screenshots_dir) {
                         self.toast_message = Some(format!("建立截圖資料夾失敗: {}", e));
@@ -303,7 +363,7 @@ impl NvrApp {
                     );
                     let filepath = screenshots_dir.join(&filename);
 
-                    match save_rgba_as_png(&filepath, frame.width, frame.height, &frame.rgba) {
+                    match save_rgba_as_png(&filepath, frame.width, frame.height, rgba_bytes) {
                         Ok(_) => {
                             info!("畫面截圖已儲存: {}", filepath.display());
                             self.toast_message =
@@ -396,6 +456,8 @@ impl NvrApp {
                     self.edit_password = self.config.camera.password.clone();
                     self.edit_main_path = self.config.camera.main_stream_path.clone();
                     self.edit_sub_path = self.config.camera.sub_stream_path.clone();
+                    self.edit_use_hw_accel = self.config.camera.use_hw_accel;
+                    self.edit_preview_max_fps = self.config.camera.preview_max_fps.to_string();
                     self.edit_segment_mins = self.config.storage.segment_duration_mins.to_string();
                     self.edit_retention_days = self.config.storage.retention_days.to_string();
                     self.edit_cleanup_cron = self.config.storage.cleanup_cron.clone();
@@ -407,6 +469,10 @@ impl NvrApp {
                 self.show_password = !self.show_password;
             }
 
+            Message::ToggleEditHwAccel => {
+                self.edit_use_hw_accel = !self.edit_use_hw_accel;
+            }
+
             Message::EditNameChanged(val) => self.edit_name = val,
             Message::EditIpChanged(val) => self.edit_ip = val,
             Message::EditPortChanged(val) => self.edit_port = val,
@@ -414,6 +480,7 @@ impl NvrApp {
             Message::EditPasswordChanged(val) => self.edit_password = val,
             Message::EditMainPathChanged(val) => self.edit_main_path = val,
             Message::EditSubPathChanged(val) => self.edit_sub_path = val,
+            Message::EditPreviewMaxFpsChanged(val) => self.edit_preview_max_fps = val,
             Message::EditSegmentMinsChanged(val) => self.edit_segment_mins = val,
             Message::EditRetentionDaysChanged(val) => self.edit_retention_days = val,
             Message::EditCleanupCronChanged(val) => self.edit_cleanup_cron = val,
@@ -431,6 +498,15 @@ impl NvrApp {
                     _ => {
                         self.toast_message =
                             Some("錯誤：RTSP 連接埠必須為 1 ~ 65535 之間的數字！".to_string());
+                        return Task::none();
+                    }
+                };
+
+                let parsed_preview_fps = match self.edit_preview_max_fps.trim().parse::<u32>() {
+                    Ok(fps) if (1..=60).contains(&fps) => fps,
+                    _ => {
+                        self.toast_message =
+                            Some("錯誤：預覽最大 FPS 請輸入 1 ~ 60 之間的整數！".to_string());
                         return Task::none();
                     }
                 };
@@ -479,8 +555,8 @@ impl NvrApp {
                     self.edit_sub_path.trim().to_string()
                 };
 
-                // 判斷攝影機連線或錄影分段時間是否有變更
-                let camera_changed = self.config.camera.ip != trimmed_ip
+                // 判斷攝影機連線、預覽設定或錄影分段時間是否有變更
+                let camera_conn_changed = self.config.camera.ip != trimmed_ip
                     || self.config.camera.port != parsed_port
                     || self.config.camera.username != self.edit_username.trim()
                     || self.config.camera.password != self.edit_password
@@ -488,7 +564,11 @@ impl NvrApp {
                     || self.config.camera.sub_stream_path != new_sub_path
                     || self.config.camera.mock_mode;
 
-                let recorder_changed = camera_changed
+                let viewer_changed = camera_conn_changed
+                    || self.config.camera.use_hw_accel != self.edit_use_hw_accel
+                    || self.config.camera.preview_max_fps != parsed_preview_fps;
+
+                let recorder_changed = camera_conn_changed
                     || self.config.storage.segment_duration_mins != parsed_seg_mins;
 
                 self.config.camera.name = if self.edit_name.trim().is_empty() {
@@ -502,6 +582,8 @@ impl NvrApp {
                 self.config.camera.password = self.edit_password.clone();
                 self.config.camera.main_stream_path = new_main_path;
                 self.config.camera.sub_stream_path = new_sub_path;
+                self.config.camera.use_hw_accel = self.edit_use_hw_accel;
+                self.config.camera.preview_max_fps = parsed_preview_fps;
                 self.config.camera.mock_mode = false;
 
                 self.config.storage.segment_duration_mins = parsed_seg_mins;
@@ -523,8 +605,8 @@ impl NvrApp {
                     .storage_cmd_tx
                     .send(StorageCommand::UpdateConfig(self.config.storage.clone()));
 
-                // 3. 若攝影機連線或單檔錄影時間有變更，通知預覽與錄影管線切換
-                if camera_changed {
+                // 3. 若預覽或錄影設定有變更，通知對應管線切換
+                if viewer_changed {
                     let _ = self
                         .viewer_cmd_tx
                         .send(ViewerCommand::UpdateConfig(self.config.camera.clone()));
@@ -538,10 +620,10 @@ impl NvrApp {
 
                 self.show_settings = false;
                 self.toast_message = Some(format!(
-                    "已套用設定：單檔 {} 分鐘、保留 {} 天、Cron '{}' ({})",
+                    "已套用設定：預覽上限 {} FPS、硬體加速={}、單檔 {} 分 ({})",
+                    self.config.camera.preview_max_fps,
+                    if self.config.camera.use_hw_accel { "開" } else { "關" },
                     self.config.storage.segment_duration_mins,
-                    self.config.storage.retention_days,
-                    self.config.storage.cleanup_cron,
                     save_status
                 ));
             }
@@ -589,14 +671,36 @@ impl NvrApp {
         .width(Length::Fill);
 
         // =========================================================
-        // 2. 中央 1280 x 720 即時預覽畫面區 (支援滑鼠左鍵連點兩下切換全螢幕)
+        // 2. 中央 1280 x 720 即時預覽畫面區 (使用 FilterMethod::Nearest 降低縮放負載)
         // =========================================================
         let video_inner: Element<'_, Message> = if let Some(ref handle) = self.frame_handle {
             container(
                 iced_image(handle.clone())
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .content_fit(ContentFit::Contain),
+                    .content_fit(ContentFit::Contain)
+                    .filter_method(iced_image::FilterMethod::Nearest),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
+        } else if self.preview_paused {
+            container(
+                column![
+                    cjk_text("省電純錄影模式 — 已暫停 720p 即時預覽畫面")
+                        .size(22)
+                        .color(Color::from_rgb(0.45, 0.85, 0.55)),
+                    cjk_text(&self.recorder_status_text)
+                        .size(16)
+                        .color(Color::from_rgb(0.75, 0.80, 0.85)),
+                    cjk_text("提示：背景 3K 無損分段錄影仍持續運作中（CPU 極低耗能狀態）；點擊下方「恢復預覽畫面」即可隨時監看")
+                        .size(14)
+                        .color(Color::from_rgb(0.55, 0.70, 0.85)),
+                ]
+                .spacing(10)
+                .align_x(Alignment::Center),
             )
             .width(Length::Fill)
             .height(Length::Fill)
@@ -612,7 +716,7 @@ impl NvrApp {
                     cjk_text(&self.viewer_status_text)
                         .size(16)
                         .color(Color::from_rgb(0.50, 0.55, 0.60)),
-                    cjk_text("提示：於畫面處「滑鼠左鍵連點兩下」（或按 F11）可切換全螢幕；點擊下方「系統與連線設定」可修改參數")
+                    cjk_text("提示：於畫面處「滑鼠左鍵連點兩下」（或按 F11）可切換全螢幕；不需看畫面時可點「暫停預覽(省電)」極大化降低 CPU 負載")
                         .size(14)
                         .color(Color::from_rgb(0.45, 0.65, 0.85)),
                 ]
@@ -629,7 +733,7 @@ impl NvrApp {
         let video_viewport: Element<'_, Message> =
             mouse_area(video_inner).on_press(Message::VideoAreaClicked).into();
 
-        // 若處於全螢幕模式，隱藏頂部與底部工具列，讓監控畫面完整填滿螢幕（連點兩下左鍵或按 Esc / F11 即可退出）
+        // 若處於全螢幕模式，隱藏頂部與底部工具列，讓監控畫面完整填滿螢幕
         if self.is_fullscreen {
             return container(video_viewport)
                 .width(Length::Fill)
@@ -638,34 +742,9 @@ impl NvrApp {
         }
 
         // =========================================================
-        // 3. 選用展開：攝影機連線、錄影分段時間與 Cron 清理排程設定面板
+        // 3. 選用展開：攝影機連線、硬體加速、預覽幀率、錄影分段時間與 Cron 清理排程設定面板
         // =========================================================
         let settings_section: Option<Element<'_, Message>> = if self.show_settings {
-            let preview_main_url = format!(
-                "rtsp://{}:{}@{}:{}{}",
-                self.edit_username.trim(),
-                if self.edit_password.is_empty() {
-                    ""
-                } else {
-                    "***"
-                },
-                self.edit_ip.trim(),
-                self.edit_port.trim(),
-                self.edit_main_path.trim()
-            );
-            let preview_sub_url = format!(
-                "rtsp://{}:{}@{}:{}{}",
-                self.edit_username.trim(),
-                if self.edit_password.is_empty() {
-                    ""
-                } else {
-                    "***"
-                },
-                self.edit_ip.trim(),
-                self.edit_port.trim(),
-                self.edit_sub_path.trim()
-            );
-
             let row1 = row![
                 cjk_text("攝影機名稱:").size(14).width(Length::Fixed(95.0)),
                 text_input("例如: 大門監控", &self.edit_name)
@@ -722,6 +801,12 @@ impl NvrApp {
             .spacing(10)
             .align_y(Alignment::Center);
 
+            let hw_accel_label = if self.edit_use_hw_accel {
+                "硬體解碼加速: 開啟 (VA-API 優先)"
+            } else {
+                "硬體解碼加速: 關閉 (純 CPU)"
+            };
+
             let row3 = row![
                 cjk_text("3K 主碼流:").size(14).width(Length::Fixed(95.0)),
                 text_input("/videoMain 或完整 rtsp://", &self.edit_main_path)
@@ -737,17 +822,21 @@ impl NvrApp {
                     .padding(6)
                     .size(14)
                     .width(Length::Fixed(200.0)),
-                cjk_text(format!(
-                    "預覽: {} | {}",
-                    preview_main_url, preview_sub_url
-                ))
-                .size(12)
-                .color(Color::from_rgb(0.60, 0.78, 0.95)),
+                cjk_text("預覽最大FPS:")
+                    .size(14)
+                    .width(Length::Fixed(90.0)),
+                text_input("預設 12", &self.edit_preview_max_fps)
+                    .on_input(Message::EditPreviewMaxFpsChanged)
+                    .padding(6)
+                    .size(14)
+                    .width(Length::Fixed(65.0)),
+                button(cjk_text(hw_accel_label).size(13))
+                    .on_press(Message::ToggleEditHwAccel)
+                    .padding([6, 12]),
             ]
             .spacing(10)
             .align_y(Alignment::Center);
 
-            // 新增第 4 列：單檔錄影時間 (分鐘)、保留天數 (天)、Cron 巡檢排程、最大容量 (GB)
             let row4 = row![
                 cjk_text("單檔時間(分):")
                     .size(14)
@@ -794,7 +883,7 @@ impl NvrApp {
             Some(
                 container(
                     column![
-                        cjk_text("系統與連線設定 — 攝影機 IP 網址、單檔錄影分鐘數 (預設 30 分)、保留天數 (預設 30 天) 與 Cron 排程 (預設每週二 03:00: '0 3 * * 2')")
+                        cjk_text("系統與連線設定 — 攝影機 IP、硬體解碼加速、預覽最大 FPS、單檔錄影分鐘數與 Cron 自動清理排程")
                             .size(14)
                             .color(Color::from_rgb(0.95, 0.82, 0.35)),
                         row1,
@@ -817,6 +906,8 @@ impl NvrApp {
         // =========================================================
         let viewer_color = if self.viewer_connected {
             Color::from_rgb(0.30, 0.85, 0.45)
+        } else if self.preview_paused {
+            Color::from_rgb(0.45, 0.78, 0.95)
         } else {
             Color::from_rgb(0.95, 0.65, 0.25)
         };
@@ -886,6 +977,12 @@ impl NvrApp {
             "開始 3K 錄影"
         };
 
+        let toggle_preview_label = if self.preview_paused {
+            "恢復預覽畫面"
+        } else {
+            "暫停預覽(省電)"
+        };
+
         let settings_btn_label = if self.show_settings {
             "收起系統設定"
         } else {
@@ -895,22 +992,25 @@ impl NvrApp {
         let controls_row = row![
             button(cjk_text(toggle_rec_label).size(14))
                 .on_press(Message::ToggleRecording)
-                .padding([8, 18]),
+                .padding([8, 16]),
+            button(cjk_text(toggle_preview_label).size(14))
+                .on_press(Message::TogglePreview)
+                .padding([8, 16]),
             button(cjk_text("畫面截圖").size(14))
                 .on_press(Message::TakeScreenshot)
-                .padding([8, 18]),
+                .padding([8, 16]),
             button(cjk_text("全螢幕預覽").size(14))
                 .on_press(Message::ToggleFullscreen)
-                .padding([8, 18]),
+                .padding([8, 16]),
             button(cjk_text("開啟錄影資料夾").size(14))
                 .on_press(Message::OpenRecordFolder)
-                .padding([8, 18]),
+                .padding([8, 16]),
             button(cjk_text("立即巡檢清理").size(14))
                 .on_press(Message::TriggerStorageCleanup)
-                .padding([8, 18]),
+                .padding([8, 16]),
             button(cjk_text(settings_btn_label).size(14))
                 .on_press(Message::ToggleSettingsPanel)
-                .padding([8, 18]),
+                .padding([8, 16]),
             horizontal_space(),
             cjk_text(format!(
                 "存檔路徑: {}",
@@ -919,7 +1019,7 @@ impl NvrApp {
             .size(12)
             .color(Color::from_rgb(0.55, 0.58, 0.62)),
         ]
-        .spacing(12)
+        .spacing(10)
         .align_y(Alignment::Center);
 
         let bottom_panel = container(

@@ -7,7 +7,9 @@ password = "your_password"
 main_stream_path = "/videoMain"   # 3K 錄影用 (3072x1728 @ 25fps)
 sub_stream_path = "/videoSub"     # 720p 預覽用 (1280x720 @ 15fps)
 enable_audio = true               # 是否同時封裝 AAC 音訊軌至 MP4
-use_hw_accel = false              # 是否優先嘗試硬體加速解碼 (vaapih264dec)
+use_hw_accel = true               # 是否優先啟用硬體加速解碼 (vah264dec / vaapih264dec)
+preview_max_fps = 12              # 預覽畫面最大更新率上限 (預設 12 FPS，降低舊電腦 CPU 與顯示卡負載)
+preview_enabled = true            # 是否開啟即時預覽畫面 (設為 false 可進入純 3K 背景錄影省電模式)
 mock_mode = false                 # 測試模式：無實體攝影機時使用 GStreamer videotestsrc 模擬雙碼流
 
 [storage]

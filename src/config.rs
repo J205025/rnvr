@@ -20,13 +20,29 @@ pub struct CameraConfig {
     pub sub_stream_path: String,
     #[serde(default = "default_enable_audio")]
     pub enable_audio: bool,
-    #[serde(default)]
+    #[serde(default = "default_use_hw_accel")]
     pub use_hw_accel: bool,
+    #[serde(default = "default_preview_max_fps")]
+    pub preview_max_fps: u32,
+    #[serde(default = "default_preview_enabled")]
+    pub preview_enabled: bool,
     #[serde(default)]
     pub mock_mode: bool,
 }
 
 fn default_enable_audio() -> bool {
+    true
+}
+
+fn default_use_hw_accel() -> bool {
+    true
+}
+
+fn default_preview_max_fps() -> u32 {
+    12
+}
+
+fn default_preview_enabled() -> bool {
     true
 }
 
@@ -127,7 +143,9 @@ impl Default for AppConfig {
                 main_stream_path: "/videoMain".to_string(),
                 sub_stream_path: "/videoSub".to_string(),
                 enable_audio: true,
-                use_hw_accel: false,
+                use_hw_accel: true,
+                preview_max_fps: 12,
+                preview_enabled: true,
                 mock_mode: false,
             },
             storage: StorageConfig {
@@ -150,6 +168,9 @@ impl AppConfig {
         let mut cfg: AppConfig = toml::from_str(&content)
             .with_context(|| format!("設定檔 TOML 格式解析失敗: {}", path_ref.display()))?;
 
+        if cfg.camera.preview_max_fps == 0 || cfg.camera.preview_max_fps > 60 {
+            cfg.camera.preview_max_fps = default_preview_max_fps();
+        }
         if cfg.storage.segment_duration_mins < 1 {
             cfg.storage.segment_duration_mins = 1;
         }
