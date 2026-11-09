@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod app;
 mod config;
 mod icon;
@@ -71,21 +73,31 @@ fn main() -> Result<()> {
         app_config.camera.mock_mode = true;
     }
 
-    // 3. 啟動 Iced 視窗 (設定專屬攝影機圖示、Wayland application_id 與 Noto Sans CJK TC 繁體中文字型)
+    // 3. 啟動 Iced 視窗 (設定專屬攝影機圖示、Wayland application_id 與繁體中文字型)
+    #[cfg(target_os = "linux")]
+    let platform_specific = window::settings::PlatformSpecific {
+        application_id: "rnvr".to_string(),
+        ..Default::default()
+    };
+    #[cfg(not(target_os = "linux"))]
+    let platform_specific = window::settings::PlatformSpecific::default();
+
+    #[cfg(target_os = "windows")]
+    let default_cjk_font = Font::with_name("Microsoft JhengHei");
+    #[cfg(not(target_os = "windows"))]
+    let default_cjk_font = Font::with_name("Noto Sans CJK TC");
+
     let win_settings = window::Settings {
         size: Size::new(1280.0, 840.0),
         icon: icon::build_window_icon(),
-        platform_specific: window::settings::PlatformSpecific {
-            application_id: "rnvr".to_string(),
-            ..Default::default()
-        },
+        platform_specific,
         ..Default::default()
     };
 
     iced::application(NvrApp::title, NvrApp::update, NvrApp::view)
         .subscription(NvrApp::subscription)
         .theme(NvrApp::theme)
-        .default_font(Font::with_name("Noto Sans CJK TC"))
+        .default_font(default_cjk_font)
         .window(win_settings)
         .run_with(move || NvrApp::new(app_config, save_path))
         .context("Iced GUI 視窗執行失敗")?;
@@ -116,8 +128,8 @@ fn load_or_init_config(explicit: Option<PathBuf>) -> Result<(AppConfig, PathBuf)
         return Ok((cfg, local));
     }
 
-    // 檢查使用者家目錄 ~/.config/rnvr/config.toml (適用於 .deb 或全系統安裝)
-    if let Ok(home) = env::var("HOME") {
+    // 檢查使用者家目錄 ~/.config/rnvr/config.toml (Linux HOME 或 Windows USERPROFILE)
+    if let Ok(home) = env::var("HOME").or_else(|_| env::var("USERPROFILE")) {
         let user_cfg_path = PathBuf::from(&home).join(".config/rnvr/config.toml");
         if user_cfg_path.exists() {
             info!("載入使用者設定檔: {}", user_cfg_path.display());
@@ -156,7 +168,7 @@ fn load_or_init_config(explicit: Option<PathBuf>) -> Result<(AppConfig, PathBuf)
 
 fn default_config_for_current_user() -> AppConfig {
     let mut cfg = AppConfig::default();
-    if let Ok(home) = env::var("HOME") {
+    if let Ok(home) = env::var("HOME").or_else(|_| env::var("USERPROFILE")) {
         cfg.storage.record_dir = PathBuf::from(home).join("Foscam_Recordings");
     }
     cfg

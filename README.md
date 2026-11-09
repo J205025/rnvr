@@ -11,7 +11,7 @@
 1. [核心設計與軟體架構](#1-核心設計與軟體架構)
 2. [攝影機規格與前置設定 (Foscam C5M)](#2-攝影機規格與前置設定-foscam-c5m)
 3. [專案目錄與模組職責](#3-專案目錄與模組職責)
-4. [安裝與跨機部署說明](#4-安裝與跨機部署說明)
+4. [安裝與跨機部署說明 (Ubuntu & Windows `.exe`)](#4-安裝與跨機部署說明)
 5. [設定檔詳解 (`config.toml`)](#5-設定檔詳解-configtoml)
 6. [軟體使用說明](#6-軟體使用說明)
 7. [終端機先行驗證與常見問題排查](#7-終端機先行驗證與常見問題排查)
@@ -212,6 +212,113 @@ rnvr/
 
 ---
 
+### 方式 D：編譯為 Windows 執行檔 (`rnvr.exe`)
+
+本專案程式碼已內建 Windows 跨平台相容處理（Windows 下自動切換為微軟正黑體 `Microsoft JhengHei`、使用檔案總管 `explorer` 開啟錄影資料夾、支援 `%USERPROFILE%` 家目錄，並在 Release 模式下透過 `windows_subsystem = "windows"` 自動隱藏背後的黑色 CMD 視窗）。
+
+您可以選擇在 Windows 本機使用 **官方 MSVC 工具鏈** 或 **MSYS2 MinGW64** 編譯出 `rnvr.exe`：
+
+#### 方法 1：於 Windows 原生 MSVC 工具鏈編譯（最推薦）
+
+1. **安裝 Rust 與 Visual Studio C++ Build Tools**：
+   * 前往 [rustup.rs](https://rustup.rs/) 下載並執行 `rustup-init.exe`，維持預設的 `x86_64-pc-windows-msvc` 工具鏈（若系統尚未安裝 Visual Studio C++ Build Tools，安裝程式會引導自動安裝）。
+   * 安裝 `pkg-config` 工具（可透過 Scoop 或 Chocolatey 安裝，例如 `scoop install pkg-config` 或 `choco install pkgconfiglite`）。
+
+2. **安裝 GStreamer Windows 官方 SDK (MSVC 64-bit)**：
+   * 前往 [GStreamer 官方下載頁](https://gstreamer.freedesktop.org/download/#windows)，下載 **MSVC 64-bit (VS 2019, Release CRT)** 的**兩個** `.msi` 安裝檔：
+     1. **Runtime installer**（例如 `gstreamer-1.0-msvc-x86_64-1.24.x.msi`）
+     2. **Development installer**（例如 `gstreamer-1.0-devel-msvc-x86_64-1.24.x.msi`）
+   * ⚠️ **安裝時請務必選擇「Complete (完整安裝)」**，以確保包含 `rtspsrc`、`splitmuxsink` 與 `avdec_h264` (`gst-libav`) 等所有必要插件。
+
+3. **設定環境變數並編譯 `rnvr.exe`（以 PowerShell 為例）**：
+   假設 GStreamer 安裝於預設路徑 `C:\gstreamer\1.0\msvc_x86_64`（請依實際安裝路徑調整）：
+   ```powershell
+   # 設定 GStreamer 根目錄與 pkg-config 搜尋路徑
+   $env:GSTREAMER_1_0_ROOT_MSVC_X86_64 = "C:\gstreamer\1.0\msvc_x86_64"
+   $env:PKG_CONFIG_PATH = "$env:GSTREAMER_1_0_ROOT_MSVC_X86_64\lib\pkgconfig"
+   $env:Path = "$env:GSTREAMER_1_0_ROOT_MSVC_X86_64\bin;" + $env:Path
+
+   # 編譯 Release 版本 Windows 執行檔
+   cargo build --release
+   ```
+   編譯完成後即可在 `target\release\rnvr.exe` 取得執行檔。
+
+#### 方法 2：於 Windows 使用 MSYS2 (MinGW64) 一鍵安裝依賴與編譯
+
+若習慣使用套件管理員自動配置依賴與 `pkg-config` 路徑，可透過 [MSYS2](https://www.msys2.org/) 的 **MSYS2 MINGW64** 終端機視窗快速建立編譯環境：
+
+1. **在 MSYS2 MINGW64 視窗安裝編譯工具與 GStreamer 套件**：
+   ```bash
+   pacman -Syu
+   pacman -S --needed \
+       mingw-w64-x86_64-toolchain \
+       mingw-w64-x86_64-rust \
+       mingw-w64-x86_64-pkgconf \
+       mingw-w64-x86_64-gstreamer \
+       mingw-w64-x86_64-gst-plugins-base \
+       mingw-w64-x86_64-gst-plugins-good \
+       mingw-w64-x86_64-gst-plugins-bad \
+       mingw-w64-x86_64-gst-plugins-ugly \
+       mingw-w64-x86_64-gst-libav
+   ```
+2. **在專案目錄執行編譯**：
+   ```bash
+   cargo build --release
+   ```
+   產出檔案同樣位於 `target/release/rnvr.exe`。
+
+#### 方法 3：於 Ubuntu Linux 交叉編譯 Windows `.exe` (`x86_64-pc-windows-gnu`)
+
+若希望在 Ubuntu 主機上直接交叉編譯出 Windows `rnvr.exe`，可按照以下步驟準備 MinGW-w64 工具鏈與 Windows 版 GStreamer (MinGW 64-bit) 開發庫：
+
+1. **安裝 Rust Windows 目標平台與 MinGW 工具鏈**：
+   ```bash
+   sudo apt update && sudo apt install -y mingw-w64 pkg-config zstd curl
+   rustup target add x86_64-pc-windows-gnu
+   ```
+2. **下載並解壓縮 Windows GStreamer (MinGW 64-bit) 開發套件至 `/opt/gst-win64`**：
+   ```bash
+   sudo mkdir -p /opt/gst-win64 && sudo chown -R $USER:$USER /opt/gst-win64
+   cd /tmp
+   for pkg in \
+     mingw-w64-x86_64-gettext-runtime-0.24-1-any.pkg.tar.zst \
+     mingw-w64-x86_64-libffi-3.4.7-1-any.pkg.tar.zst \
+     mingw-w64-x86_64-pcre2-10.45-1-any.pkg.tar.zst \
+     mingw-w64-x86_64-zlib-1.3.1-1-any.pkg.tar.zst \
+     mingw-w64-x86_64-orc-0.4.41-1-any.pkg.tar.zst \
+     mingw-w64-x86_64-glib2-2.82.5-1-any.pkg.tar.zst \
+     mingw-w64-x86_64-gstreamer-1.24.12-1-any.pkg.tar.zst \
+     mingw-w64-x86_64-gst-plugins-base-1.24.12-1-any.pkg.tar.zst; do
+     curl -sLO "https://mirror.msys2.org/mingw/mingw64/$pkg"
+     tar --zstd -xf "$pkg" --strip-components=1 -C /opt/gst-win64 mingw64/
+   done
+   sed -i 's|^prefix=.*|prefix=/opt/gst-win64|g' /opt/gst-win64/lib/pkgconfig/*.pc
+   ```
+3. **指定 `PKG_CONFIG_LIBDIR` 並執行交叉編譯**：
+   ```bash
+   cd /home/ubuntu/ws_rust/rnvr
+   export PKG_CONFIG_ALLOW_CROSS=1
+   export PKG_CONFIG_LIBDIR="/opt/gst-win64/lib/pkgconfig"
+
+   cargo build --release --target x86_64-pc-windows-gnu
+   ```
+   編譯完成後即可於 `target/x86_64-pc-windows-gnu/release/rnvr.exe` 取得 Windows 執行檔。
+
+#### Windows 執行與跨機部署注意事項
+
+* **首次啟動與設定檔位置**：
+  * 可將 `config.example.toml` 複製到與 `rnvr.exe` 同一資料夾並改名為 `config.toml`，將 `record_dir` 改為 Windows 路徑格式（例如 `record_dir = "D:/Foscam_Recordings"` 或 `"C:\\Users\\您的帳號\\Foscam_Recordings"`）。
+  * 若同目錄下無 `config.toml`，程式啟動時會自動在 `%USERPROFILE%\.config\rnvr\config.toml` 建立設定檔，並預設將錄影存於 `%USERPROFILE%\Foscam_Recordings`。
+* **跨機複製 `rnvr.exe` 到其他 Windows 電腦**：
+  * 目標 Windows 電腦只需安裝對應的 GStreamer 官方 **Runtime installer (`.msi`)**（安裝時選擇 **Complete**，並確認 GStreamer 的 `bin` 目錄如 `C:\gstreamer\1.0\msvc_x86_64\bin` 已加入系統 `PATH` 環境變數），即可直接雙擊執行 `rnvr.exe`。
+* **在 Windows PowerShell 檢視環境檢查或除錯輸出**：
+  * 由於 Release 版的 `rnvr.exe` 預設隱藏背景主控台視窗 (`windows_subsystem = "windows"`)，若需在 PowerShell 檢視 `--check-env` 或除錯日誌，可將輸出導向管線，或在開發時使用 `cargo run`：
+    ```powershell
+    .\target\release\rnvr.exe --check-env | Out-Host
+    ```
+
+---
+
 ## 5. 設定檔詳解 (`config.toml`)
 
 程式啟動時會依序搜尋以下位置的設定檔：
@@ -276,16 +383,19 @@ auto_start_recording = true      # 啟動軟體時是否立即自動開始 3K �
 │                                                                        │
 │                                                                        │
 │                       1280 x 720 即時預覽畫面區                          │
-│                         (自動等比例縮放填滿視窗)                          │
+│           (自動等比例縮放填滿視窗，滑鼠左鍵連點兩下切換全螢幕)           │
 │                                                                        │
 │                                                                        │
 ├────────────────────────────────────────────────────────────────────────┤
 │ 預覽狀態: 連線正常 (15.0 FPS)  |  錄影狀態: 寫入中 (foscam_...mp4)       │
 │ 磁碟空間: [████████░░] 52.40 / 100.0 GB | 單檔: 30分 | 保留: 30天 | 下次 Cron 巡檢: 2026-11-10 03:00 │
-│ [ 暫停 3K 錄影 ] [ 畫面截圖 ] [ 開啟錄影資料夾 ] [ 立即巡檢清理 ] [ 系統與連線設定 ] │
+│ [ 暫停 3K 錄影 ] [ 畫面截圖 ] [ 全螢幕預覽 ] [ 開啟錄影資料夾 ] [ 立即巡檢清理 ] [ 系統與連線設定 ] │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
+* **全螢幕預覽模式 (Fullscreen)**：
+  * **進入全螢幕**：在中央預覽畫面處**滑鼠左鍵連續點擊兩下 (Double-Click)**、點擊底部 **`[ 全螢幕預覽 ]`** 按鈕，或按下鍵盤 **`F11`**，視窗即會切換為全螢幕並自動隱藏頂部與底部工具列，讓監控畫面完整填滿整個螢幕。
+  * **退出全螢幕**：在全螢幕畫面處再次**滑鼠左鍵連續點擊兩下**，或按下鍵盤 **`Esc`** / **`F11`**，即可立即恢復一般視窗與操作面板。
 * **頂部狀態列**：
   * **`[● REC 3K]`**（紅燈）：代表背景 3K 主碼流正在正常寫入硬碟。
   * **`[● 連線錄影中]`**（黃燈）：代表錄影功能已啟用，正在連線或等待自動重連。
@@ -293,6 +403,7 @@ auto_start_recording = true      # 啟動軟體時是否立即自動開始 3K �
 * **底部控制按鈕**：
   * **`[ 暫停 3K 錄影 ]` / `[ 開始 3K 錄影 ]`**：隨時切換背景 3K 錄影狀態。按下暫停時會安全封裝當前 MP4 切片檔尾；再次開始時會建立新的時間戳記切片檔。
   * **`[ 畫面截圖 ]`**：將當前預覽畫面儲存為無損 PNG 圖檔，存放於 `<record_dir>/screenshots/snapshot_YYYYMMDD_HHMMSS.png`。
+  * **`[ 全螢幕預覽 ]`**：一鍵進入全螢幕監控模式（亦可直接於預覽畫面連點兩下滑鼠左鍵或按 `F11`）。
   * **`[ 開啟錄影資料夾 ]`**：直接呼叫系統檔案管理員開啟 `<record_dir>` 檢視歷史錄影與截圖。
   * **`[ 立即巡檢清理 ]`**：立即手動觸發一次硬碟空間統計、超過保留天數過期檔案刪除與 $90\%$ 水位清理檢查。
   * **`[ 系統與連線設定 ]`**：在軟體內直接展開設定面板，可即時修改並儲存：

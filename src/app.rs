@@ -7,15 +7,17 @@ use crate::viewer::{spawn_viewer_worker, PreviewFrame, ViewerCommand, ViewerEven
 use chrono::Local;
 use flume::{Receiver, Sender};
 use iced::widget::{
-    button, column, container, horizontal_space, image as iced_image, progress_bar, row, text,
-    text_input,
+    button, column, container, horizontal_space, image as iced_image, mouse_area, progress_bar,
+    row, text, text_input,
 };
-use iced::{Alignment, Color, ContentFit, Element, Length, Subscription, Task, Theme};
+use iced::{
+    keyboard, window, Alignment, Color, ContentFit, Element, Length, Subscription, Task, Theme,
+};
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{error, info};
 
 pub struct NvrApp {
@@ -58,6 +60,10 @@ pub struct NvrApp {
     // 底部操作回饋訊息 (如截圖或儲存設定通知)
     toast_message: Option<String>,
 
+    // 全螢幕狀態與滑鼠左鍵連點兩下偵測
+    is_fullscreen: bool,
+    last_video_click: Option<Instant>,
+
     // 跨執行緒通訊 Channels
     viewer_rx: Receiver<ViewerEvent>,
     viewer_cmd_tx: Sender<ViewerCommand>,
@@ -84,6 +90,10 @@ pub enum Message {
     TakeScreenshot,
     OpenRecordFolder,
     TriggerStorageCleanup,
+    // 全螢幕切換與畫面滑鼠點擊事件
+    VideoAreaClicked,
+    ToggleFullscreen,
+    ExitFullscreen,
     // 系統與連線設定相關事件
     ToggleSettingsPanel,
     ToggleShowPassword,
@@ -182,6 +192,8 @@ impl NvrApp {
             edit_cleanup_cron,
             edit_max_storage_gb,
             toast_message: None,
+            is_fullscreen: false,
+            last_video_click: None,
             viewer_rx,
             viewer_cmd_tx,
             recorder_rx,
@@ -202,8 +214,14 @@ impl NvrApp {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        // 約 30Hz (33ms) 輪詢更新預覽畫面與管線狀態
-        iced::time::every(Duration::from_millis(33)).map(|_| Message::Tick)
+        // 約 30Hz (33ms) 輪詢更新預覽畫面與管線狀態，並監聽 F11 / Esc 全螢幕快捷鍵
+        let tick_sub = iced::time::every(Duration::from_millis(33)).map(|_| Message::Tick);
+        let key_sub = keyboard::on_key_press(|key, _modifiers| match key {
+            keyboard::Key::Named(keyboard::key::Named::F11) => Some(Message::ToggleFullscreen),
+            keyboard::Key::Named(keyboard::key::Named::Escape) => Some(Message::ExitFullscreen),
+            _ => None,
+        });
+        Subscription::batch([tick_sub, key_sub])
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -304,7 +322,14 @@ impl NvrApp {
             Message::OpenRecordFolder => {
                 let dir = &self.config.storage.record_dir;
                 let _ = std::fs::create_dir_all(dir);
-                match Command::new("xdg-open").arg(dir).spawn() {
+                let open_cmd = if cfg!(target_os = "windows") {
+                    "explorer"
+                } else if cfg!(target_os = "macos") {
+                    "open"
+                } else {
+                    "xdg-open"
+                };
+                match Command::new(open_cmd).arg(dir).spawn() {
                     Ok(_) => {
                         self.toast_message = Some(format!("已開啟資料夾: {}", dir.display()));
                     }
@@ -320,6 +345,44 @@ impl NvrApp {
                 let _ = self.storage_cmd_tx.send(StorageCommand::RunCleanupNow);
                 self.toast_message =
                     Some("已手動觸發硬碟空間巡檢與過期/超量檔案清理".to_string());
+            }
+
+            Message::VideoAreaClicked => {
+                let now = Instant::now();
+                if let Some(prev) = self.last_video_click {
+                    if now.duration_since(prev) <= Duration::from_millis(400) {
+                        self.last_video_click = None;
+                        return self.update(Message::ToggleFullscreen);
+                    }
+                }
+                self.last_video_click = Some(now);
+            }
+
+            Message::ToggleFullscreen => {
+                self.is_fullscreen = !self.is_fullscreen;
+                self.last_video_click = None;
+                let target_mode = if self.is_fullscreen {
+                    self.toast_message = Some(
+                        "已進入全螢幕模式（滑鼠左鍵連點兩下畫面或按 Esc / F11 即可返回）"
+                            .to_string(),
+                    );
+                    window::Mode::Fullscreen
+                } else {
+                    self.toast_message = Some("已退出全螢幕模式".to_string());
+                    window::Mode::Windowed
+                };
+                return window::get_latest()
+                    .and_then(move |id| window::change_mode(id, target_mode));
+            }
+
+            Message::ExitFullscreen => {
+                if self.is_fullscreen {
+                    self.is_fullscreen = false;
+                    self.last_video_click = None;
+                    self.toast_message = Some("已退出全螢幕模式".to_string());
+                    return window::get_latest()
+                        .and_then(|id| window::change_mode(id, window::Mode::Windowed));
+                }
             }
 
             Message::ToggleSettingsPanel => {
@@ -526,9 +589,9 @@ impl NvrApp {
         .width(Length::Fill);
 
         // =========================================================
-        // 2. 中央 1280 x 720 即時預覽畫面區 (自動等比例縮放填滿視窗)
+        // 2. 中央 1280 x 720 即時預覽畫面區 (支援滑鼠左鍵連點兩下切換全螢幕)
         // =========================================================
-        let video_viewport: Element<'_, Message> = if let Some(ref handle) = self.frame_handle {
+        let video_inner: Element<'_, Message> = if let Some(ref handle) = self.frame_handle {
             container(
                 iced_image(handle.clone())
                     .width(Length::Fill)
@@ -549,7 +612,7 @@ impl NvrApp {
                     cjk_text(&self.viewer_status_text)
                         .size(16)
                         .color(Color::from_rgb(0.50, 0.55, 0.60)),
-                    cjk_text("提示：可點擊下方「系統與連線設定」修改攝影機 IP、單檔錄影分鐘數、保留天數與 Cron 排程")
+                    cjk_text("提示：於畫面處「滑鼠左鍵連點兩下」（或按 F11）可切換全螢幕；點擊下方「系統與連線設定」可修改參數")
                         .size(14)
                         .color(Color::from_rgb(0.45, 0.65, 0.85)),
                 ]
@@ -562,6 +625,17 @@ impl NvrApp {
             .center_y(Length::Fill)
             .into()
         };
+
+        let video_viewport: Element<'_, Message> =
+            mouse_area(video_inner).on_press(Message::VideoAreaClicked).into();
+
+        // 若處於全螢幕模式，隱藏頂部與底部工具列，讓監控畫面完整填滿螢幕（連點兩下左鍵或按 Esc / F11 即可退出）
+        if self.is_fullscreen {
+            return container(video_viewport)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into();
+        }
 
         // =========================================================
         // 3. 選用展開：攝影機連線、錄影分段時間與 Cron 清理排程設定面板
@@ -824,6 +898,9 @@ impl NvrApp {
                 .padding([8, 18]),
             button(cjk_text("畫面截圖").size(14))
                 .on_press(Message::TakeScreenshot)
+                .padding([8, 18]),
+            button(cjk_text("全螢幕預覽").size(14))
+                .on_press(Message::ToggleFullscreen)
                 .padding([8, 18]),
             button(cjk_text("開啟錄影資料夾").size(14))
                 .on_press(Message::OpenRecordFolder)
