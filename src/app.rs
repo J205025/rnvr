@@ -229,7 +229,11 @@ impl NvrApp {
     }
 
     pub fn title(&self) -> String {
-        format!("Ubuntu Rust NVR - Foscam C5M ({})", self.config.camera.ip)
+        format!(
+            "Ubuntu Rust NVR v{} - Foscam C5M ({})",
+            env!("CARGO_PKG_VERSION"),
+            self.config.camera.ip
+        )
     }
 
     pub fn theme(&self) -> Theme {
@@ -659,6 +663,12 @@ impl NvrApp {
                 ))
                 .size(14)
                 .color(Color::from_rgb(0.60, 0.68, 0.78)),
+                cjk_text(format!(
+                    "v{} | 作者: Lin Ming-Chi <j205025@gmail.com>",
+                    env!("CARGO_PKG_VERSION")
+                ))
+                .size(13)
+                .color(Color::from_rgb(0.55, 0.62, 0.70)),
                 horizontal_space(),
                 cjk_text(&self.current_time_str)
                     .size(16)

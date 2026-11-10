@@ -1,9 +1,10 @@
 [package]
 name = "rnvr"
 version = "1.0.0"
+authors = ["Lin Ming-Chi <j205025@gmail.com>"]
 edition = "2021"
 license = "MIT"
-description = "Ubuntu Rust NVR 監控錄影系統 — 單機雙碼流分離架構 (Foscam C5M)"
+description = "Ubuntu Rust NVR 監控錄影系統 (v1.0.0) — 單機雙碼流分離架構 (Foscam C5M)"
 
 [dependencies]
 anyhow = "1.0"
@@ -22,10 +23,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 urlencoding = "2.1"
 
 [package.metadata.deb]
-maintainer = "Ubuntu Rust NVR Developer <admin@localhost>"
-copyright = "2026, Ubuntu Rust NVR Developer"
+maintainer = "Lin Ming-Chi <j205025@gmail.com>"
+copyright = "2026, Lin Ming-Chi <j205025@gmail.com>"
 extended-description = """\
-Ubuntu Rust NVR Surveillance System for Foscam C5M (Dual-Stream Split Architecture). \
+Rust NVR Surveillance System v1.0.0 for Foscam C5M (Dual-Stream Split Architecture). \
+Author: Lin Ming-Chi <j205025@gmail.com>. \
 Supports 3K (/videoMain) zero-decode MP4 segmented recording, 720p (/videoSub) live preview, \
 customizable segment duration (default 30 mins), retention days (default 30 days), \
 and Cron-scheduled disk space cleanup (default Tuesday 03:00)."""

@@ -1,4 +1,8 @@
-# Ubuntu Rust NVR 監控錄影系統 (`rnvr`)
+# Ubuntu Rust NVR 監控錄影系統 (`rnvr` v1.0.0)
+
+* **目前版本**：`v1.0.0`
+* **作者 (Author)**：Lin Ming-Chi
+* **聯絡信箱 (Mail)**：`j205025@gmail.com`
 
 專為 **Ubuntu Linux 桌面環境** 與 **Foscam C5M (3K 5MP)** 網路攝影機打造的超低負載桌面監控與循環錄影 GUI 系統。
 
@@ -123,6 +127,7 @@ rnvr/
 ├── config.toml            # 攝影機連線參數與循環錄影設定檔
 ├── config.example.toml    # 設定檔預設範本 (供 cargo deb 封裝與版控使用)
 ├── install.sh             # Ubuntu 跨機一鍵安裝與桌面捷徑部署腳本
+├── uninstall.sh           # Ubuntu 一鍵移除腳本 (移除執行檔、桌面捷徑與圖示)
 ├── rnvr.md                # 原始系統架構規劃書
 ├── README.md              # 軟體架構、安裝與使用說明文件
 ├── assets/
@@ -193,6 +198,12 @@ rnvr/
    * **[2/4]** 將編譯好的 `target/release/rnvr` 安裝至 `/usr/local/bin/rnvr`（若無預編譯檔則自動呼叫 `cargo build --release` 編譯）。
    * **[3/4]** 於 `~/.config/rnvr/config.toml` 建立個人化設定檔，並建立預設錄影目錄 `~/Foscam_Recordings`。
    * **[4/4]** 建立 Ubuntu 桌面應用程式捷徑 `~/.local/share/applications/rnvr.desktop`（可在 Ubuntu 應用程式選單直接找到 **「Foscam Rust NVR 監控系統」**），並執行 `rnvr --check-env` 驗證所有多媒體插件。
+3. **移除軟體 (`uninstall.sh`)**：
+   ```bash
+   chmod +x uninstall.sh
+   ./uninstall.sh          # 移除執行檔、圖示與桌面捷徑 (並詢問是否刪除設定檔)
+   ./uninstall.sh --purge  # 一併清除 ~/.config/rnvr 設定檔 (安全保留 ~/Foscam_Recordings 錄影資料夾)
+   ```
 
 ---
 

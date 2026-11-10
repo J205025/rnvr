@@ -2,7 +2,8 @@
 set -euo pipefail
 
 echo "=========================================================="
-echo "  Ubuntu Rust NVR (Foscam C5M) 一鍵環境安裝與部署腳本"
+echo "  Rust NVR v1.0.0 (Foscam C5M) 一鍵環境安裝與部署腳本"
+echo "  作者: Lin Ming-Chi <j205025@gmail.com>"
 echo "=========================================================="
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,8 +66,9 @@ mkdir -p "${APP_DIR}"
 cat > "${APP_DIR}/rnvr.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Foscam Rust NVR 監控系統
-Comment=Foscam C5M 單機雙碼流 (3K 錄影 + 720p 預覽) 監控錄影系統
+Version=1.0
+Name=Foscam Rust NVR 監控系統 v1.0.0
+Comment=Foscam C5M 單機雙碼流 (3K 錄影 + 720p 預覽) 監控錄影系統 | 作者: Lin Ming-Chi <j205025@gmail.com>
 Exec=/usr/local/bin/rnvr --config ${CONFIG_DIR}/config.toml
 Icon=${ICON_DIR_PNG}/rnvr.png
 StartupWMClass=rnvr
@@ -88,4 +90,6 @@ echo "2. 啟動軟體指令："
 echo "   rnvr"
 echo "3. 若尚未接上攝影機想測試畫面與分段錄影，可執行："
 echo "   rnvr --mock"
+echo "4. 若日後需移除軟體，可執行："
+echo "   ./uninstall.sh"
 echo "=========================================================="

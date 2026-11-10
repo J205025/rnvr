@@ -54,13 +54,23 @@ fn main() -> Result<()> {
             "--check-env" => {
                 check_env_only = true;
             }
+            "--version" | "-V" | "-v" => {
+                println!("rnvr v{}", env!("CARGO_PKG_VERSION"));
+                println!("作者 (Author): Lin Ming-Chi <j205025@gmail.com>");
+                return Ok(());
+            }
             "--help" | "-h" => {
-                println!("Ubuntu Rust NVR 監控錄影系統 (Foscam C5M 單機雙碼流分離架構)");
+                println!(
+                    "Ubuntu Rust NVR 監控錄影系統 v{} (Foscam C5M 單機雙碼流分離架構)",
+                    env!("CARGO_PKG_VERSION")
+                );
+                println!("作者: Lin Ming-Chi <j205025@gmail.com>");
                 println!("用法: rnvr [選項]");
                 println!("  -c, --config <PATH>       指定設定檔路徑 (預設自動搜尋 ./config.toml 或 ~/.config/rnvr/config.toml)");
                 println!("  -r, --renderer <BACKEND>  指定圖形渲染後端: auto (預設), gl (硬體 OpenGL), vulkan, tiny-skia (2D 軟體)");
                 println!("  --mock                    啟用測試訊號源模式 (無須連接實體攝影機即可驗證預覽與分段錄影)");
                 println!("  --check-env               檢查系統 GStreamer 插件與硬體解碼支援並結束");
+                println!("  -V, --version             顯示版本與作者資訊");
                 println!("  -h, --help                顯示此說明");
                 return Ok(());
             }
