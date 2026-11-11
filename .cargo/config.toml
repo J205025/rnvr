@@ -1,0 +1,4 @@
+# 針對 Lenovo ThinkCentre M900 (Intel 6th Gen Skylake + HD Graphics 530) 啟用原生指令集最佳化：
+# 解鎖 AVX2 (256-bit SIMD)、FMA、BMI1/BMI2，讓 tiny-skia 2D 渲染管線 (u32x8 / i32x8 SIMD) 與影像處理獲得最高指令吞吐量與更低功耗。
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=skylake"]

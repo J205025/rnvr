@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Foscam Rust NVR 監控系統 v1.0.0
+GenericName=NVR 監控錄影系統
+Comment=Foscam C5M 單機雙碼流 (3K 錄影 + 720p 預覽) 監控錄影系統 | 作者: Lin Ming-Chi <j205025@gmail.com>
+Exec=/usr/bin/rnvr
+Icon=rnvr
+StartupWMClass=rnvr
+Terminal=false
+Categories=AudioVideo;Video;Recorder;
+Keywords=NVR;RTSP;Foscam;Camera;Recorder;監控;錄影;

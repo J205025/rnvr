@@ -1,0 +1,21 @@
+[camera]
+name = "大門監控 (Foscam C5M)"
+ip = "192.168.2.106"
+port = 88
+username = "foscam"
+password = "Happy12345"
+main_stream_path = "/videoMain"   # 3K 錄影用 (3072x1728 @ 25fps)
+sub_stream_path = "/videoSub"     # 720p 預覽用 (1280x720 @ 15fps)
+enable_audio = true               # 是否同時封裝 AAC 音訊軌至 MP4
+use_hw_accel = true               # 啟用 Lenovo M900 (Intel HD 530 iHD VA-API) vah264dec 硬體加速解碼
+preview_max_fps = 12              # 預覽畫面最大更新率上限 (預設 12 FPS，在 VAMemory 階段即節流以降低功耗)
+preview_enabled = true            # 是否開啟即時預覽畫面 (設為 false 可進入純 3K 背景錄影省電模式)
+mock_mode = false                 # 測試模式：無實體攝影機時使用 GStreamer videotestsrc 模擬雙碼流
+
+[storage]
+record_dir = "/home/ubuntu/Foscam_Recordings"
+segment_duration_mins = 30        # 單一 MP4 檔案錄影時間 (預設 30 分鐘)
+retention_days = 30               # 錄影檔案保留天數 (預設超過 30 天自動刪除)
+cleanup_cron = "0 3 * * 2"        # 磁碟巡檢 Cron 排程 (分 時 日 月 週，預設每週二 03:00 檢查)
+max_storage_gb = 100.0            # 錄影資料夾最大容量上限 (例如 100 GB)
+auto_start_recording = true       # 啟動軟體時自動開始 3K 錄影
